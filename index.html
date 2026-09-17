@@ -75,10 +75,10 @@
 
     var locationDir = location.pathname.replace(/[^\/]*$/, "");
     var PREFIX = CDN ? CDN + "/assets/" : locationDir + "assets/";
-    // Blob workers cannot resolve relative or path-absolute URLs against a blob:
-    // base, so everything injected into worker code must be fully absolute.
+    // Normalize once to a fully absolute URL: on file:// the pathname is
+    // "/C:/..." and path-relative strings are unusable for fetch/XHR.
+    try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
     var ABS_PREFIX = PREFIX;
-    try { ABS_PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
 
     function rewrite(s) {
       if (typeof s !== "string") return s;
@@ -304,6 +304,19 @@
           }
         } catch (e) {}
       }
+
+      // Rewrite the web manifest so its root-relative icon paths work here too.
+      try {
+        var mURL = new URL("site.webmanifest", location.href).href;
+        var mx = new XMLHttpRequest();
+        mx.open("GET", mURL, false);
+        mx.send(null);
+        if (mx.status >= 200 && mx.status < 300 || mx.status === 0) {
+          var mText = mx.responseText.split("/assets/").join(ABS_PREFIX);
+          var mLink = document.querySelector('link[rel="manifest"]');
+          if (mLink) mLink.href = URL.createObjectURL(new Blob([mText], { type: "application/manifest+json" }));
+        }
+      } catch (e) {}
 
       // Inline the CSS with rewritten url() paths (a <link> would leave
       // root-relative url(/assets/...) unpatched, breaking on file:// and subpaths).
