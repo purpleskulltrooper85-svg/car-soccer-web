@@ -92,13 +92,58 @@
 
     // ----- fetch patch ---------------------------------------------------------
     var realFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
+
+    var MIME = {
+      gltf: "model/gltf+json", glb: "model/gltf-binary", json: "application/json",
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+      ktx2: "image/ktx2", basis: "image/basis", bin: "application/octet-stream",
+      wasm: "application/wasm", mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav",
+      webm: "audio/webm", m4a: "audio/mp4", css: "text/css", js: "text/javascript"
+    };
+    function guessMime(url) {
+      var m = /\.([A-Za-z0-9]+)(?:\?|$)/.exec(url);
+      return m ? (MIME[m[1].toLowerCase()] || "application/octet-stream") : "application/octet-stream";
+    }
+
+    // fetch() is unavailable for file: URLs; fall back to XHR (works with status 0).
+    function xhrToResponse(url, init) {
+      return new Promise(function (resolve, reject) {
+        try {
+          var x = new XMLHttpRequest();
+          x.open((init && init.method) || "GET", url, true);
+          if (init && init.headers) {
+            try { for (var k in init.headers) x.setRequestHeader(k, init.headers[k]); } catch (e) {}
+          }
+          x.responseType = "arraybuffer";
+          x.onload = function () {
+            resolve(new Response(x.response, {
+              status: x.status === 0 ? 200 : x.status,
+              statusText: x.status === 0 ? "OK" : x.statusText,
+              headers: { "Content-Type": guessMime(url) }
+            }));
+          };
+          x.onerror = function () { reject(new TypeError("Failed to fetch " + url)); };
+          x.onabort = function () { reject(new DOMException("Aborted", "AbortError")); };
+          x.send(null);
+        } catch (e) { reject(e); }
+      });
+    }
+
+    function isFileUrl(s) { return typeof s === "string" && s.indexOf("file:") === 0; }
+
     if (realFetch) {
       window.fetch = function (input, init) {
         try {
-          if (input && typeof input === "object" && typeof input.url === "string")
-            return realFetch(new Request(rewrite(input.url), input), init);
-          if (typeof input === "string") return realFetch(rewrite(input), init);
-          if (input instanceof URL) return realFetch(rewrite(input.href), init);
+          var urlStr = null, reqObj = null;
+          if (input && typeof input === "object" && typeof input.url === "string") { reqObj = input; urlStr = input.url; }
+          else if (input instanceof URL) urlStr = input.href;
+          else if (typeof input === "string") urlStr = input;
+          if (urlStr != null) {
+            var rurl = rewrite(urlStr);
+            if (isFileUrl(rurl)) return xhrToResponse(rurl, reqObj || init);
+            if (reqObj) return realFetch(new Request(rurl, reqObj), init);
+            return realFetch(rurl, init);
+          }
         } catch (e) {}
         return realFetch(input, init);
       };
@@ -260,11 +305,27 @@
         } catch (e) {}
       }
 
-      var link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.crossOrigin = "anonymous";
-      link.href = cssURL;
-      document.head.appendChild(link);
+      // Inline the CSS with rewritten url() paths (a <link> would leave
+      // root-relative url(/assets/...) unpatched, breaking on file:// and subpaths).
+      try {
+        var cx = new XMLHttpRequest();
+        cx.open("GET", cssURL, false);
+        cx.send(null);
+        if (cx.status >= 200 && cx.status < 300 || cx.status === 0) {
+          var cssText = cx.responseText.split("/assets/").join(ABS_PREFIX);
+          var style = document.createElement("style");
+          style.textContent = cssText;
+          document.head.appendChild(style);
+        } else {
+          throw new Error("CSS " + cx.status);
+        }
+      } catch (e) {
+        var link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.crossOrigin = "anonymous";
+        link.href = cssURL;
+        document.head.appendChild(link);
+      }
 
       var script = document.createElement("script");
       script.type = "module";
@@ -272,8 +333,8 @@
       script.src = entryURL;
       script.onerror = function () {
         fail("Failed to load the game bundle from:\n" + entryURL +
-             "\n\nIf you are opening this file directly (file://), most browsers block the\n" +
-             "module worker it needs. Serve the folder over http(s) or add\n" +
+             "\n\nNote: strict browsers (Chrome/Edge) block module scripts on file:// pages.\n" +
+             "If this tab is Chrome/Edge, serve the folder over http(s) or add\n" +
              "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main to the URL.");
       };
       script.addEventListener("load", hideSplash);
