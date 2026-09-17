@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#12376f" />
+  <title>Car Soccer</title>
+  <link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48" />
+  <link rel="manifest" href="site.webmanifest" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0e14; }
+    #app { height: 100%; }
+    #boot-splash {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      background: #0b0e14; color: #dfe6f3; z-index: 9999;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      transition: opacity .4s ease; pointer-events: none;
+    }
+    #boot-splash.hide { opacity: 0; }
+    #boot-splash .spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,.15); border-top-color: #4f8ef7;
+      animation: boot-spin 0.9s linear infinite;
+    }
+    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    #boot-splash.error { pointer-events: auto; }
+    #boot-splash.error .spinner { display: none; }
+    #boot-splash .msg { max-width: 640px; text-align: center; line-height: 1.5; font-size: 14px; padding: 0 16px; }
+    #boot-splash.error .msg { color: #ff9d9d; white-space: pre-line; }
+  </style>
+  <script>
+  /* ============================================================================
+   * Car Soccer - single-file web port loader
+   *
+   * The original bundle resolves assets with origin-rooted paths like
+   * "/assets/..." and spawns a module worker via `new URL(..., import.meta.url)`,
+   * so it can only load from car-soccer.com itself. This loader makes it run
+   * from anywhere by:
+   *   1. rewriting every asset URL (fetch / <img> / Worker / inside-worker) to
+   *      an asset CDN,
+   *   2. wrapping cross-origin workers into same-origin blob workers,
+   *   3. stubbing the offline service worker handshake when the real one
+   *      (game-sw.js) is unavailable on the current origin.
+   *
+   * CDN resolution order:
+   *   - window.CAR_SOCCER_CDN  (edit the line below for a permanent setting)
+   *   - "?cdn=..." query parameter  (also remembered in localStorage)
+   *   - localStorage "car-soccer:cdn"
+   *   - empty string: assets served from the folder next to this index.html
+   *     (works for local static servers and GitHub Pages)
+   *
+   * Example CDN value once this repo is on GitHub (repo must be public):
+   *   https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main
+   * ==========================================================================*/
+  (function () {
+    "use strict";
+
+    // ----- configuration -----------------------------------------------------
+    var CDN = ""; // <-- optionally hardcode e.g. "https://cdn.jsdelivr.net/gh/user/car-soccer-web@main"
+    try {
+      if (window.CAR_SOCCER_CDN) CDN = String(window.CAR_SOCCER_CDN).trim();
+      var qs = new URLSearchParams(location.search);
+      var p = qs.get("cdn");
+      if (p) {
+        CDN = p.trim();
+        try { localStorage.setItem("car-soccer:cdn", CDN); } catch (e) {}
+      } else if (!CDN) {
+        var ls = null;
+        try { ls = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
+        if (ls) CDN = ls.trim();
+      }
+    } catch (e) {}
+    if (CDN) CDN = CDN.replace(/\/+$/, "");
+
+    var locationDir = location.pathname.replace(/[^\/]*$/, "");
+    var PREFIX = CDN ? CDN + "/assets/" : locationDir + "assets/";
+
+    function rewrite(s) {
+      if (typeof s !== "string") return s;
+      if (s.indexOf(PREFIX) === 0) return s;
+      if (s.indexOf("/assets/") === 0) return PREFIX + s.slice(8);
+      if (s.indexOf("assets/") === 0) return PREFIX + s.slice(7);
+      var m = /^https?:\/\/[^\/]+\/assets\/(.*)$/.exec(s);
+      if (m) return PREFIX + m[1];
+      return s;
+    }
+
+    // ----- fetch patch ---------------------------------------------------------
+    var realFetch = typeof window.fetch === "function" ? window.fetch.bind(window) : null;
+    if (realFetch) {
+      window.fetch = function (input, init) {
+        try {
+          if (input && typeof input === "object" && typeof input.url === "string")
+            return realFetch(new Request(rewrite(input.url), input), init);
+          if (typeof input === "string") return realFetch(rewrite(input), init);
+          if (input instanceof URL) return realFetch(rewrite(input.href), init);
+        } catch (e) {}
+        return realFetch(input, init);
+      };
+    }
+
+    // ----- <img> patch (three.js ImageLoader and `new Image`) -------------------
+    if (typeof HTMLImageElement !== "undefined") {
+      var imgSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+      var guard = function (el) {
+        try {
+          if (el instanceof HTMLImageElement && !el.__csPatched) {
+            el.__csPatched = true;
+            Object.defineProperty(el, "src", {
+              get: function () { return imgSrc.get.call(el); },
+              set: function (v) { imgSrc.set.call(el, rewrite(v)); },
+              configurable: true, enumerable: true
+            });
+          }
+        } catch (e) {}
+        return el;
+      };
+      var rawCE = document.createElement.bind(document);
+      document.createElement = function () {
+        return guard(rawCE.apply(null, arguments));
+      };
+      if (document.createElementNS) {
+        var rawCENS = document.createElementNS.bind(document);
+        document.createElementNS = function () {
+          return guard(rawCENS.apply(null, arguments));
+        };
+      }
+      var rawSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function (name, value) {
+        try {
+          if (this instanceof HTMLImageElement && String(name).toLowerCase() === "src")
+            return rawSetAttr.call(this, name, rewrite(value));
+        } catch (e) {}
+        return rawSetAttr.call(this, name, value);
+      };
+      var RawImage = window.Image;
+      window.Image = function (w, h) { return guard(new RawImage(w, h)); };
+      window.Image.prototype = RawImage.prototype;
+    }
+
+    // ----- Worker wrapper (cross-origin / subpath-safe blob workers) ------------
+    var RawWorker = window.Worker;
+    window.Worker = function (url, opts) {
+      var raw = (url && typeof url === "object" && "href" in url) ? url.href : String(url);
+      var abs = rewrite(raw);
+      var text = null;
+      try {
+        var x = new XMLHttpRequest();
+        x.open("GET", abs, false); // sync: Worker constructors cannot await
+        x.send(null);
+        if (x.status >= 200 && x.status < 300 || x.status === 0) text = x.responseText;
+      } catch (e) {}
+      if (text == null) return new RawWorker(abs, opts);
+      text = text.split('"/assets/').join('"' + PREFIX)
+                 .split("'/assets/").join("'" + PREFIX)
+                 .split("`/assets/").join("`" + PREFIX);
+      var prelude =
+        'var __PREFIX=' + JSON.stringify(PREFIX) + ';' +
+        'var __rw=function(u){try{' +
+        'if(typeof u==="string"){' +
+        'if(u.indexOf(__PREFIX)===0)return u;' +
+        'if(u.indexOf("/assets/")===0)return __PREFIX+u.slice(8);' +
+        'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);' +
+        'var m=/^https?:\\/\\/[^\\/]+\\/assets\\/(.*)$/.exec(u);if(m)return __PREFIX+m[1];' +
+        '}else if(u&&typeof u.url==="string"){return __rw(u.url)}' +
+        '}catch(e){}return u};' +
+        'var __f=self.fetch?self.fetch.bind(self):null;' +
+        'if(__f){self.fetch=function(i,o){try{' +
+        'if(i&&typeof i.url==="string")return __f(new Request(__rw(i.url),i),o);' +
+        'return __f(__rw(i),o);}catch(e){return __f(i,o)}}}' +
+        'var __xo=XMLHttpRequest.prototype.open;' +
+        'XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);' +
+        'a[1]=__rw(a[1]);return __xo.apply(this,a)};';
+      var blob = new Blob([prelude + text], { type: "application/javascript" });
+      return new RawWorker(URL.createObjectURL(blob), opts);
+    };
+    window.Worker.prototype = RawWorker.prototype;
+
+    // ----- service worker stubs (only when the real game-sw.js can't work) ------
+    try {
+      if (!window.isSecureContext)
+        Object.defineProperty(window, "isSecureContext", { value: true, configurable: true });
+    } catch (e) {}
+    try { if (!("caches" in window)) window.caches = {}; } catch (e) {}
+    if ("serviceWorker" in navigator) {
+      var sw = navigator.serviceWorker;
+      var realRegister = sw.register.bind(sw);
+      var realGet = sw.getRegistration.bind(sw);
+      var realReady = null;
+      try { realReady = sw.ready; } catch (e) {}
+      var fakeReg = null;
+      var makeFake = function () {
+        if (fakeReg) return fakeReg;
+        var active = {
+          scriptURL: location.protocol + "//" + location.host + "/game-sw.js",
+          postMessage: function (msg, transfer) {
+            var port = transfer && transfer[0];
+            if (port) setTimeout(function () {
+              try { port.postMessage({ kind: "offline-ready", completed: 0, total: 0 }); } catch (e) {}
+            }, 0);
+          }
+        };
+        fakeReg = {
+          installing: null, waiting: null, active: active, scope: "/",
+          update: function () { return Promise.resolve(); },
+          unregister: function () { return Promise.resolve(true); },
+          addEventListener: function () {}, removeEventListener: function () {}
+        };
+        return fakeReg;
+      };
+      sw.register = function (u, o) {
+        return realRegister(u, o).catch(function () { return makeFake(); });
+      };
+      sw.getRegistration = function () {
+        return realGet.apply(sw, arguments).catch(function () { return null; });
+      };
+      try {
+        Object.defineProperty(sw, "ready", {
+          configurable: true,
+          get: function () {
+            if (realReady && realReady.then) return realReady.catch(function () { return makeFake(); });
+            return Promise.resolve(makeFake());
+          }
+        });
+      } catch (e) {}
+    }
+
+    // ----- boot -----------------------------------------------------------------
+    var splash = document.getElementById("boot-splash");
+    var splashMsg = document.getElementById("boot-msg");
+    function fail(msg) {
+      if (!splash) return;
+      splash.classList.add("error");
+      splashMsg.textContent = msg;
+    }
+    function hideSplash() {
+      if (splash) { splash.classList.add("hide"); setTimeout(function () { splash.remove(); }, 500); }
+    }
+
+    var entryURL = PREFIX + "game-DskACDFO.js";
+    var cssURL = PREFIX + "game-C5MKlKFb.css";
+
+    // Probe so a missing local asset folder produces a clear message.
+    if (location.protocol === "http:" || location.protocol === "https:") {
+      try {
+        var probe = new XMLHttpRequest();
+        probe.open("HEAD", entryURL, false);
+        probe.send(null);
+        if (!(probe.status >= 200 && probe.status < 300) && !CDN) {
+          fail("Game assets were not found next to index.html (" + entryURL + ").\n\n" +
+               "Serve this whole folder with any static server (e.g. \"npx serve\"),\n" +
+               "or add ?cdn=<asset-base-url> to the page URL.");
+          return;
+        }
+      } catch (e) {}
+    }
+
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.crossOrigin = "anonymous";
+    link.href = cssURL;
+    document.head.appendChild(link);
+
+    var script = document.createElement("script");
+    script.type = "module";
+    script.crossOrigin = "anonymous";
+    script.src = entryURL;
+    script.onerror = function () {
+      fail("Failed to load the game bundle from:\n" + entryURL +
+           "\n\nIf you are opening this file directly (file://), most browsers block the\n" +
+           "module worker it needs. Serve the folder over http(s) or add\n" +
+           "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main to the URL.");
+    };
+    script.addEventListener("load", hideSplash);
+    document.body.appendChild(script);
+  })();
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="boot-splash">
+    <div class="spinner"></div>
+    <div class="msg" id="boot-msg">Loading Car Soccer...</div>
+  </div>
+</body>
+</html>
