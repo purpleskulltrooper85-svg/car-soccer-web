@@ -51,8 +51,14 @@ index.html?cdn=https://cdn.jsdelivr.net/gh/<user>/<repo>@main
 ```
 
 The value is remembered in `localStorage`, so you only need the parameter once.
-(Serve over `http(s)`; opening via `file://` is unreliable because browsers block module
-workers there.)
+
+### 2b. Double-click `index.html` (file://)
+
+Opening the file directly also works — no server needed. The loader falls back to
+XMLHttpRequest for `fetch()` (browsers block `fetch` on `file://`), rewrites the bundle's
+drive-rooted asset URLs, and stubs the service-worker handshake (real offline caching is
+http-only). Verified in Chromium-based browsers; Firefox/Safari may still block module
+scripts or workers on `file://` pages — use a local server if so.
 
 ### 3. GitHub Pages
 
