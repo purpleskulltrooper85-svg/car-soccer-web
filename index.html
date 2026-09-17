@@ -226,54 +226,61 @@
       } catch (e) {}
     }
 
-    // ----- boot -----------------------------------------------------------------
-    var splash = document.getElementById("boot-splash");
-    var splashMsg = document.getElementById("boot-msg");
-    function fail(msg) {
-      if (!splash) return;
-      splash.classList.add("error");
-      splashMsg.textContent = msg;
+    function boot() {
+      var splash = document.getElementById("boot-splash");
+      var splashMsg = document.getElementById("boot-msg");
+      function fail(msg) {
+        if (!splash) return;
+        splash.classList.add("error");
+        splashMsg.textContent = msg;
+      }
+      function hideSplash() {
+        if (splash) { splash.classList.add("hide"); setTimeout(function () { splash.remove(); }, 500); }
+      }
+
+      var entryURL = PREFIX + "game-DskACDFO.js";
+      var cssURL = PREFIX + "game-C5MKlKFb.css";
+
+      // Probe so a missing local asset folder produces a clear message.
+      if (location.protocol === "http:" || location.protocol === "https:") {
+        try {
+          var probe = new XMLHttpRequest();
+          probe.open("HEAD", entryURL, false);
+          probe.send(null);
+          if (!(probe.status >= 200 && probe.status < 300) && !CDN) {
+            fail("Game assets were not found next to index.html (" + entryURL + ").\n\n" +
+                 "Serve this whole folder with any static server (e.g. \"npx serve\"),\n" +
+                 "or add ?cdn=<asset-base-url> to the page URL.");
+            return;
+          }
+        } catch (e) {}
+      }
+
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.crossOrigin = "anonymous";
+      link.href = cssURL;
+      document.head.appendChild(link);
+
+      var script = document.createElement("script");
+      script.type = "module";
+      script.crossOrigin = "anonymous";
+      script.src = entryURL;
+      script.onerror = function () {
+        fail("Failed to load the game bundle from:\n" + entryURL +
+             "\n\nIf you are opening this file directly (file://), most browsers block the\n" +
+             "module worker it needs. Serve the folder over http(s) or add\n" +
+             "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main to the URL.");
+      };
+      script.addEventListener("load", hideSplash);
+      document.body.appendChild(script);
     }
-    function hideSplash() {
-      if (splash) { splash.classList.add("hide"); setTimeout(function () { splash.remove(); }, 500); }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot);
+    } else {
+      boot();
     }
-
-    var entryURL = PREFIX + "game-DskACDFO.js";
-    var cssURL = PREFIX + "game-C5MKlKFb.css";
-
-    // Probe so a missing local asset folder produces a clear message.
-    if (location.protocol === "http:" || location.protocol === "https:") {
-      try {
-        var probe = new XMLHttpRequest();
-        probe.open("HEAD", entryURL, false);
-        probe.send(null);
-        if (!(probe.status >= 200 && probe.status < 300) && !CDN) {
-          fail("Game assets were not found next to index.html (" + entryURL + ").\n\n" +
-               "Serve this whole folder with any static server (e.g. \"npx serve\"),\n" +
-               "or add ?cdn=<asset-base-url> to the page URL.");
-          return;
-        }
-      } catch (e) {}
-    }
-
-    var link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.crossOrigin = "anonymous";
-    link.href = cssURL;
-    document.head.appendChild(link);
-
-    var script = document.createElement("script");
-    script.type = "module";
-    script.crossOrigin = "anonymous";
-    script.src = entryURL;
-    script.onerror = function () {
-      fail("Failed to load the game bundle from:\n" + entryURL +
-           "\n\nIf you are opening this file directly (file://), most browsers block the\n" +
-           "module worker it needs. Serve the folder over http(s) or add\n" +
-           "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main to the URL.");
-    };
-    script.addEventListener("load", hideSplash);
-    document.body.appendChild(script);
   })();
   </script>
 </head>
