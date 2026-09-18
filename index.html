@@ -236,7 +236,55 @@
     } catch (e) {}
 
     // ----- Worker wrapper (cross-origin / subpath-safe blob workers) ------------
+    // Blob module workers are broken on file:// pages in Chrome, so every worker
+    // becomes a CLASSIC blob worker injected with a self-replicating prelude:
+    // faked location (blob: bases break new URL), rewritten fetch/XHR, and a
+    // nested-worker patch (ORT's pthread pool spawns new Worker(location.href,
+    // {type:"module"}) which would otherwise be a refused cross-origin worker).
     var RawWorker = window.Worker;
+
+    var WORKER_PRELUDE_TEMPLATE = [
+      'var __PREFIX=__PREFIX__;',
+      'var __HREF=__HREF__;',
+      'var __T=__TPL__;',
+      'try{var __lu=new URL(__HREF);var __loc={href:__lu.href,protocol:__lu.protocol,host:__lu.host,hostname:__lu.hostname,port:__lu.port,pathname:__lu.pathname,search:"",hash:"",origin:__lu.origin};',
+      'Object.defineProperty(self,"location",{get:function(){return __loc},configurable:true})}catch(e){}',
+      'var __rw=function(u){try{',
+      'if(typeof u==="string"){',
+      'var i=u.indexOf("/assets/");if(i>=0)return __PREFIX+u.slice(i+8);',
+      'if(u.indexOf(__PREFIX)===0)return u;',
+      'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);',
+      '}else if(u&&typeof u.url==="string"){return __rw(u.url)}',
+      '}catch(e){}return u};',
+      'var __f=self.fetch?self.fetch.bind(self):null;',
+      'var __mime=function(u){var m=/\\.([A-Za-z0-9]+)(?:\\?|$)/.exec(u);return m&&({"gltf":"model/gltf+json","glb":"model/gltf-binary","json":"application/json","bin":"application/octet-stream","wasm":"application/wasm","onnx":"application/octet-stream"}[m[1].toLowerCase()])||"application/octet-stream"};',
+      'var __xhr=function(u,o){return new Promise(function(res,rej){try{var x=new XMLHttpRequest();x.open((o&&o.method)||"GET",u,true);x.responseType="arraybuffer";x.onload=function(){res(new Response(x.response,{status:x.status===0?200:x.status,headers:{"Content-Type":__mime(u)}}))};x.onerror=function(){rej(new TypeError("Failed to fetch "+u))};x.onabort=function(){rej(new DOMException("Aborted","AbortError"))};x.send(null)}catch(e){rej(e)}})};',
+      'if(__f){self.fetch=function(i,o){try{var s=(i&&typeof i.url==="string")?i.url:(typeof i==="string"?i:(i&&i.href)||null);',
+      'if(s!=null){var r2=__rw(s);if(r2.indexOf("file:")===0)return __xhr(r2,o);',
+      'if(i&&typeof i.url==="string")return __f(new Request(r2,i),o);return __f(r2,o)}}catch(e){}return __f(i,o)}}',
+      'var __xo=XMLHttpRequest.prototype.open;',
+      'XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);',
+      'a[1]=__rw(a[1]);return __xo.apply(this,a)};',
+      'var __RW=self.Worker;',
+      'self.Worker=function(u,o){',
+      'var s=(u&&typeof u==="object"&&"href" in u)?u.href:String(u);',
+      'var abs=s;try{abs=new URL(s,__loc.href).href}catch(e){}',
+      'var txt=null;try{var x2=new XMLHttpRequest();x2.open("GET",abs,false);x2.send(null);',
+      'if(x2.status>=200&&x2.status<300||x2.status===0)txt=x2.responseText}catch(e){}',
+      'if(txt==null)return new __RW(abs,o);',
+      'var pre2=self.__T.split("__HREF"+"__").join(JSON.stringify(abs)).split("__PREFIX"+"__").join(JSON.stringify(__PREFIX)).split("__TPL"+"__").join("null");',
+      'var b2=new Blob([pre2+"self.__T="+JSON.stringify(self.__T)+";"+txt.split("/assets/").join(__PREFIX)],{type:"application/javascript"});',
+      'return new __RW(URL.createObjectURL(b2))};',
+      'self.Worker.prototype=__RW.prototype;'
+    ].join("");
+
+    function preludeFor(absUrl) {
+      return WORKER_PRELUDE_TEMPLATE
+        .split("__PREFIX__").join(JSON.stringify(ABS_PREFIX))
+        .split("__HREF__").join(JSON.stringify(absUrl))
+        .split("__TPL__").join(JSON.stringify(WORKER_PRELUDE_TEMPLATE));
+    }
+
     window.Worker = function (url, opts) {
       var raw = (url && typeof url === "object" && "href" in url) ? url.href : String(url);
       var abs = rewrite(raw);
@@ -248,41 +296,15 @@
         x.send(null);
         if (x.status >= 200 && x.status < 300 || x.status === 0) text = x.responseText;
       } catch (e) {}
-      // Blob module workers are broken on file:// pages in Chrome, so always
-      // construct a CLASSIC worker: the game worker has no static imports/
-      // exports, and dynamic import() works in classic workers.
-      var prelude =
-        'var __PREFIX=' + JSON.stringify(ABS_PREFIX) + ';' +
-        // Fake location: the worker resolves its wasm/module paths relative to
-        // its own script URL; a blob: base would throw "Invalid URL".
-        'try{var __loc={href:' + JSON.stringify(abs) + ',protocol:"https:",host:"x",hostname:"x",port:"",pathname:"/worker.js",search:"",hash:"",origin:"https://x"};' +
-        'Object.defineProperty(self,"location",{get:function(){return __loc},configurable:true})}catch(e){}' +
-        'var __rw=function(u){try{' +
-        'if(typeof u==="string"){' +
-        'var i=u.indexOf("/assets/");if(i>=0)return __PREFIX+u.slice(i+8);' +
-        'if(u.indexOf(__PREFIX)===0)return u;' +
-        'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);' +
-        '}else if(u&&typeof u.url==="string"){return __rw(u.url)}' +
-        '}catch(e){}return u};' +
-        'var __f=self.fetch?self.fetch.bind(self):null;' +
-        'var __mime=function(u){var m=/\\.([A-Za-z0-9]+)(?:\\?|$)/.exec(u);return m&&({"gltf":"model/gltf+json","glb":"model/gltf-binary","json":"application/json","bin":"application/octet-stream","wasm":"application/wasm","onnx":"application/octet-stream"}[m[1].toLowerCase()])||"application/octet-stream"};' +
-        'var __xhr=function(u,o){return new Promise(function(res,rej){try{var x=new XMLHttpRequest();x.open((o&&o.method)||"GET",u,true);x.responseType="arraybuffer";x.onload=function(){res(new Response(x.response,{status:x.status===0?200:x.status,headers:{"Content-Type":__mime(u)}}))};x.onerror=function(){rej(new TypeError("Failed to fetch "+u))};x.onabort=function(){rej(new DOMException("Aborted","AbortError"))};x.send(null)}catch(e){rej(e)}})};' +
-        'if(__f){self.fetch=function(i,o){try{var s=(i&&typeof i.url==="string")?i.url:(typeof i==="string"?i:(i&&i.href)||null);' +
-        'if(s!=null){var r2=__rw(s);if(r2.indexOf("file:")===0)return __xhr(r2,o);' +
-        'if(i&&typeof i.url==="string")return __f(new Request(r2,i),o);return __f(r2,o)}}catch(e){}return __f(i,o)}}' +
-        'var __xo=XMLHttpRequest.prototype.open;' +
-        'XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);' +
-        'a[1]=__rw(a[1]);return __xo.apply(this,a)};';
       var body;
       if (text != null) {
-        body = prelude + text.split('"/assets/').join('"' + ABS_PREFIX)
-                              .split("'/assets/").join("'" + ABS_PREFIX)
-                              .split("`/assets/").join("`" + ABS_PREFIX);
+        body = preludeFor(abs) + text.split('"/assets/').join('"' + ABS_PREFIX)
+                                     .split("'/assets/").join("'" + ABS_PREFIX)
+                                     .split("`/assets/").join("`" + ABS_PREFIX);
       } else if (isModule) {
-        // Dynamic import works in module and classic contexts alike.
-        body = prelude + 'import(' + JSON.stringify(abs) + ').catch(function(e){setTimeout(function(){throw e},0)});';
+        body = preludeFor(abs) + 'import(' + JSON.stringify(abs) + ').catch(function(e){setTimeout(function(){throw e},0)});';
       } else {
-        body = prelude + 'importScripts(' + JSON.stringify(abs) + ');';
+        body = preludeFor(abs) + 'importScripts(' + JSON.stringify(abs) + ');';
       }
       var blob = new Blob([body], { type: "application/javascript" });
       return new RawWorker(URL.createObjectURL(blob));
