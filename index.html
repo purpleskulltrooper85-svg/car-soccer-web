@@ -286,8 +286,11 @@
       var fakeReg = null;
       var makeFake = function () {
         if (fakeReg) return fakeReg;
+        // Origin-independent scriptURL: the game only checks that
+        // new URL(scriptURL).pathname === "/game-sw.js", so pin an absolute
+        // https URL and never depend on location.host (unreliable on file://).
         var active = {
-          scriptURL: location.protocol + "//" + location.host + "/game-sw.js",
+          scriptURL: "https://car-soccer-loader.local/game-sw.js",
           state: "activated",
           postMessage: function (msg, transfer) {
             var port = transfer && transfer[0];
@@ -312,7 +315,7 @@
         // Nuclear option: swap the entire ServiceWorkerContainer on file:// pages
         // so no real implementation quirk can leak through.
         var fakeContainer = {
-          controller: null,
+          get controller() { return makeFake().active; },
           ready: Promise.resolve(makeFake()),
           register: function () { return Promise.resolve(makeFake()); },
           getRegistration: function () { return Promise.resolve(undefined); },
@@ -361,7 +364,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v3";
+      var LOADER_VERSION = "v4";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
       function fail(msg) {
