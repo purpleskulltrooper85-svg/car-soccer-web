@@ -216,11 +216,31 @@
       window.Image.prototype = RawImage.prototype;
     }
 
+    // ----- innerHTML patch: imgs inserted via HTML strings bypass createElement -
+    try {
+      var ihDesc = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+      if (ihDesc && ihDesc.set) {
+        Object.defineProperty(Element.prototype, "innerHTML", {
+          get: ihDesc.get,
+          set: function (v) {
+            try {
+              if (typeof v === "string" && v.indexOf("/assets/") >= 0)
+                v = v.split('"/assets/').join('"' + ABS_PREFIX)
+                     .split("'/assets/").join("'" + ABS_PREFIX);
+            } catch (e) {}
+            ihDesc.set.call(this, v);
+          },
+          configurable: true, enumerable: true
+        });
+      }
+    } catch (e) {}
+
     // ----- Worker wrapper (cross-origin / subpath-safe blob workers) ------------
     var RawWorker = window.Worker;
     window.Worker = function (url, opts) {
       var raw = (url && typeof url === "object" && "href" in url) ? url.href : String(url);
       var abs = rewrite(raw);
+      var isModule = !!(opts && opts.type === "module");
       var text = null;
       try {
         var x = new XMLHttpRequest();
@@ -228,12 +248,15 @@
         x.send(null);
         if (x.status >= 200 && x.status < 300 || x.status === 0) text = x.responseText;
       } catch (e) {}
-      if (text == null) return new RawWorker(abs, opts);
-      text = text.split('"/assets/').join('"' + ABS_PREFIX)
-                 .split("'/assets/").join("'" + ABS_PREFIX)
-                 .split("`/assets/").join("`" + ABS_PREFIX);
+      // Blob module workers are broken on file:// pages in Chrome, so always
+      // construct a CLASSIC worker: the game worker has no static imports/
+      // exports, and dynamic import() works in classic workers.
       var prelude =
         'var __PREFIX=' + JSON.stringify(ABS_PREFIX) + ';' +
+        // Fake location: the worker resolves its wasm/module paths relative to
+        // its own script URL; a blob: base would throw "Invalid URL".
+        'try{var __loc={href:' + JSON.stringify(abs) + ',protocol:"https:",host:"x",hostname:"x",port:"",pathname:"/worker.js",search:"",hash:"",origin:"https://x"};' +
+        'Object.defineProperty(self,"location",{get:function(){return __loc},configurable:true})}catch(e){}' +
         'var __rw=function(u){try{' +
         'if(typeof u==="string"){' +
         'var i=u.indexOf("/assets/");if(i>=0)return __PREFIX+u.slice(i+8);' +
@@ -250,8 +273,19 @@
         'var __xo=XMLHttpRequest.prototype.open;' +
         'XMLHttpRequest.prototype.open=function(){var a=Array.prototype.slice.call(arguments);' +
         'a[1]=__rw(a[1]);return __xo.apply(this,a)};';
-      var blob = new Blob([prelude + text], { type: "application/javascript" });
-      return new RawWorker(URL.createObjectURL(blob), opts);
+      var body;
+      if (text != null) {
+        body = prelude + text.split('"/assets/').join('"' + ABS_PREFIX)
+                              .split("'/assets/").join("'" + ABS_PREFIX)
+                              .split("`/assets/").join("`" + ABS_PREFIX);
+      } else if (isModule) {
+        // Dynamic import works in module and classic contexts alike.
+        body = prelude + 'import(' + JSON.stringify(abs) + ').catch(function(e){setTimeout(function(){throw e},0)});';
+      } else {
+        body = prelude + 'importScripts(' + JSON.stringify(abs) + ');';
+      }
+      var blob = new Blob([body], { type: "application/javascript" });
+      return new RawWorker(URL.createObjectURL(blob));
     };
     window.Worker.prototype = RawWorker.prototype;
 
@@ -364,7 +398,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v4";
+      var LOADER_VERSION = "v5";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
       function fail(msg) {
@@ -394,16 +428,21 @@
         } catch (e) {}
       }
 
-      // Rewrite the web manifest so its root-relative icon paths work here too.
+      // Web manifest: on file:// Chrome blocks it entirely (CORS on unique
+      // origins), so remove the link; on http(s) rewrite it to a blob.
       try {
-        var mURL = new URL("site.webmanifest", location.href).href;
-        var mx = new XMLHttpRequest();
-        mx.open("GET", mURL, false);
-        mx.send(null);
-        if (mx.status >= 200 && mx.status < 300 || mx.status === 0) {
-          var mText = mx.responseText.split("/assets/").join(ABS_PREFIX);
-          var mLink = document.querySelector('link[rel="manifest"]');
-          if (mLink) mLink.href = URL.createObjectURL(new Blob([mText], { type: "application/manifest+json" }));
+        var mLink0 = document.querySelector('link[rel="manifest"]');
+        if (location.protocol === "file:") {
+          if (mLink0) mLink0.remove();
+        } else {
+          var mURL = new URL("site.webmanifest", location.href).href;
+          var mx = new XMLHttpRequest();
+          mx.open("GET", mURL, false);
+          mx.send(null);
+          if (mx.status >= 200 && mx.status < 300 || mx.status === 0) {
+            var mText = mx.responseText.split("/assets/").join(ABS_PREFIX);
+            if (mLink0) mLink0.href = URL.createObjectURL(new Blob([mText], { type: "application/manifest+json" }));
+          }
         }
       } catch (e) {}
 
