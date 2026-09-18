@@ -33,32 +33,38 @@ python -m http.server 8000
 No configuration needed — assets load from the same folder. First load precaches the whole
 game (~65 MB) for offline use.
 
-### 2. One HTML file + CDN
+### 2. One HTML file + CDN (default)
 
-Push this repo to a **public** GitHub repository, then use jsDelivr as the asset CDN:
+The loader is pre-wired to load everything from the separate **car-soccer-assets** repo via
+jsDelivr. Set-up (one time):
 
-```
-https://cdn.jsdelivr.net/gh/<user>/<repo>@main
-```
+1. Push `car-soccer-assets` (sibling folder of this repo) to a **public** GitHub repository:
+   ```
+   cd car-soccer-assets
+   git remote add origin https://github.com/<user>/car-soccer-assets.git
+   git push -u origin main
+   ```
+2. Replace `YOUR-USERNAME` in the `CDN` line near the top of the script in `index.html`:
+   ```
+   https://cdn.jsdelivr.net/gh/<user>/car-soccer-assets@main
+   ```
+   (or skip the edit and open `index.html?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-assets@main`
+   once — the value is remembered in `localStorage`).
 
-Then either:
-
-- edit the `CDN` variable at the top of the script in `index.html`, or
-- just open `index.html` with a query parameter:
-
-```
-index.html?cdn=https://cdn.jsdelivr.net/gh/<user>/<repo>@main
-```
-
-The value is remembered in `localStorage`, so you only need the parameter once.
+After that, `index.html` runs with no local asset folder and works even when opened directly
+via `file://` (jsDelivr sends the CORS headers browsers require for module scripts).
+All game files are under jsDelivr's 20 MB per-file limit (largest: 11.4 MB wasm).
 
 ### 2b. Double-click `index.html` (file://)
 
-Opening the file directly also works — no server needed. The loader falls back to
-XMLHttpRequest for `fetch()` (browsers block `fetch` on `file://`), rewrites the bundle's
-drive-rooted asset URLs, and stubs the service-worker handshake (real offline caching is
-http-only). Verified in Chromium-based browsers; Firefox/Safari may still block module
-scripts or workers on `file://` pages — use a local server if so.
+Two ways that both work with no server:
+
+- **CDN mode** (recommended): complete the set-up in section 2 — assets stream from jsDelivr.
+- **Local mode**: if no CDN is configured, the loader falls back to the `assets/` folder next
+  to `index.html`. The loader falls back to XMLHttpRequest for `fetch()` (browsers block
+  `fetch` on `file://`), rewrites the bundle's drive-rooted asset URLs, and stubs the
+  service-worker handshake (real offline caching is http-only). Verified in Chromium-based
+  browsers; Firefox/Safari may still block module scripts or workers on `file://` pages.
 
 ### 3. GitHub Pages
 
