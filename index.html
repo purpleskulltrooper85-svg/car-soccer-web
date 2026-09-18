@@ -69,7 +69,10 @@
     } catch (e) {}
 
     // ----- configuration -----------------------------------------------------
-    var CDN = ""; // <-- optionally hardcode e.g. "https://cdn.jsdelivr.net/gh/user/car-soccer-web@main"
+    // Default asset source: the "car-soccer-assets" GitHub repo via jsDelivr.
+    // 1. Push C:\Users\purpl\Downloads\car-soccer-assets to a PUBLIC GitHub repo
+    // 2. Replace YOUR-USERNAME below (or open with ?cdn=<base-url> once - it sticks)
+    var CDN = "https://cdn.jsdelivr.net/gh/YOUR-USERNAME/car-soccer-assets@main";
     try {
       if (window.CAR_SOCCER_CDN) CDN = String(window.CAR_SOCCER_CDN).trim();
       var qs = new URLSearchParams(location.search);
@@ -77,6 +80,11 @@
       if (p) {
         CDN = p.trim();
         try { localStorage.setItem("car-soccer:cdn", CDN); } catch (e) {}
+      } else if (CDN.indexOf("YOUR-USERNAME") >= 0) {
+        // Placeholder not replaced yet - use a saved value or local files instead.
+        var saved0 = null;
+        try { saved0 = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
+        CDN = saved0 ? saved0.trim() : "";
       } else if (!CDN) {
         var ls = null;
         try { ls = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
@@ -86,7 +94,8 @@
     if (CDN) CDN = CDN.replace(/\/+$/, "");
 
     var locationDir = location.pathname.replace(/[^\/]*$/, "");
-    var PREFIX = CDN ? CDN + "/assets/" : locationDir + "assets/";
+    // CDN mode: files sit at the repo root. Local mode: ./assets/ next to index.html.
+    var PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
     // Normalize once to a fully absolute URL: on file:// the pathname is
     // "/C:/..." and path-relative strings are unusable for fetch/XHR.
     try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
@@ -94,13 +103,13 @@
 
     function rewrite(s) {
       if (typeof s !== "string") return s;
-      if (s.indexOf(PREFIX) === 0) return s;
-      if (s.indexOf("/assets/") === 0) return PREFIX + s.slice(8);
-      if (s.indexOf("assets/") === 0) return PREFIX + s.slice(7);
-      // The bundle pre-resolves some URLs with new URL("/assets/x", location.href);
-      // on file:// those become drive-rooted paths (file:///C:/assets/x).
+      // Scan for the "/assets/" marker FIRST: a URL that still contains it
+      // (e.g. new URL("/assets/w.js", import.meta.url)) must be rewritten even
+      // when it happens to start with the CDN prefix.
       var i = s.indexOf("/assets/");
       if (i >= 0) return PREFIX + s.slice(i + 8);
+      if (s.indexOf(PREFIX) === 0) return s;
+      if (s.indexOf("assets/") === 0) return PREFIX + s.slice(7);
       return s;
     }
 
@@ -227,10 +236,9 @@
         'var __PREFIX=' + JSON.stringify(ABS_PREFIX) + ';' +
         'var __rw=function(u){try{' +
         'if(typeof u==="string"){' +
-        'if(u.indexOf(__PREFIX)===0)return u;' +
-        'if(u.indexOf("/assets/")===0)return __PREFIX+u.slice(8);' +
-        'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);' +
         'var i=u.indexOf("/assets/");if(i>=0)return __PREFIX+u.slice(i+8);' +
+        'if(u.indexOf(__PREFIX)===0)return u;' +
+        'if(u.indexOf("assets/")===0)return __PREFIX+u.slice(7);' +
         '}else if(u&&typeof u.url==="string"){return __rw(u.url)}' +
         '}catch(e){}return u};' +
         'var __f=self.fetch?self.fetch.bind(self):null;' +
@@ -386,9 +394,10 @@
       script.src = entryURL;
       script.onerror = function () {
         fail("Failed to load the game bundle from:\n" + entryURL +
-             "\n\nNote: strict browsers (Chrome/Edge) block module scripts on file:// pages.\n" +
-             "If this tab is Chrome/Edge, serve the folder over http(s) or add\n" +
-             "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main to the URL.");
+             "\n\nIf using the default CDN: push the car-soccer-assets folder to a PUBLIC\n" +
+             "GitHub repo, then replace YOUR-USERNAME in index.html (or open with\n" +
+             "?cdn=https://cdn.jsdelivr.net/gh/<user>/car-soccer-assets@main once).\n" +
+             "Check the URL is correct and the repo is public.");
       };
       script.addEventListener("load", hideSplash);
       document.body.appendChild(script);
