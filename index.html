@@ -304,9 +304,18 @@
         return fakeReg;
       };
       sw.register = function (u, o) {
-        return realRegister(u, o).catch(function () { return makeFake(); });
+        // On file:// some browsers resolve register() with an inert registration
+        // instead of rejecting - bypass the real container entirely there.
+        if (location.protocol === "file:") return Promise.resolve(makeFake());
+        return realRegister(u, o).then(function (reg) {
+          try {
+            if (!reg || (!reg.active && !reg.waiting && !reg.installing)) return makeFake();
+          } catch (e) { return makeFake(); }
+          return reg;
+        }).catch(function () { return makeFake(); });
       };
       sw.getRegistration = function () {
+        if (location.protocol === "file:") return Promise.resolve(undefined);
         return realGet.apply(sw, arguments).catch(function () { return null; });
       };
       try {
