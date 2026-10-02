@@ -83,10 +83,9 @@
     } catch (e) {}
 
     // ----- configuration -----------------------------------------------------
-    // Default asset source: the "car-soccer-assets" GitHub repo via jsDelivr.
-    // 1. Push C:\Users\purpl\Downloads\car-soccer-assets to a PUBLIC GitHub repo
-    // 2. Replace YOUR-USERNAME below (or open with ?cdn=<base-url> once - it sticks)
-    var CDN = "https://cdn.jsdelivr.net/gh/purpleskulltrooper85-svg/car-soccer-assets@main";
+    // Default asset source: GitHub Pages (always fresh, CORS-enabled).
+    // Backup CDN: https://cdn.jsdelivr.net/gh/purpleskulltrooper85-svg/car-soccer-assets@main
+    var CDN = "https://purpleskulltrooper85-svg.github.io/car-soccer-assets";
     try {
       if (window.CAR_SOCCER_CDN) CDN = String(window.CAR_SOCCER_CDN).trim();
       var qs = new URLSearchParams(location.search);
@@ -434,7 +433,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v7";
+      var LOADER_VERSION = "v8";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
 
