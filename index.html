@@ -49,6 +49,8 @@
     #perf-badge.on { display: block; }
     @keyframes boot-spin { to { transform: rotate(360deg); } }
     #boot-splash.error { pointer-events: auto; }
+    #boot-splash.ready { pointer-events: auto; cursor: pointer; }
+    #boot-splash.ready .pct { font-size: 15px; opacity: 1; }
     #boot-splash.error .spinner, #boot-splash.error .bar-wrap, #boot-splash.error .pct { display: none; }
     #boot-splash .msg { max-width: 640px; text-align: center; line-height: 1.5; font-size: 14px; padding: 0 16px; }
     #boot-splash.error .msg { color: #ff9d9d; white-space: pre-line; }
@@ -512,7 +514,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v9";
+      var LOADER_VERSION = "v10";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
 
@@ -647,6 +649,25 @@
             tryNext("HTTP " + xhr.status);
             return;
           }
+          // Click-to-start gate (bypass with ?autostart for automated tests).
+          if (new URLSearchParams(location.search).has("autostart")) {
+            startGame();
+          } else {
+            setBar(100, "click to play");
+            if (splash) splash.classList.add("ready");
+            splash.addEventListener("mousedown", function go() {
+              splash.classList.remove("ready");
+              startGame();
+            }, { once: true });
+            window.addEventListener("keydown", function onKey(e) {
+              if (e.key === "Enter" || e.key === " ") {
+                window.removeEventListener("keydown", onKey);
+                startGame();
+              }
+            });
+          }
+        };
+        function startGame() {
           setBar(100, "starting game...");
           var script = document.createElement("script");
           script.type = "module";
@@ -658,7 +679,7 @@
           };
           script.addEventListener("load", hideSplash);
           document.body.appendChild(script);
-        };
+        }
         xhr.onerror = function () {
           clearInterval(fakeTimer);
           tryNext("network error");
