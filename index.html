@@ -37,7 +37,7 @@
     }
     @keyframes boot-bar-slide { to { background-position: -200% 0; } }
     #boot-splash .pct { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .75; }
-    #boot-splash .perf-row { margin-top: 18px; font-size: 13px; opacity: .92; user-select: none; }
+    #boot-splash .perf-row { margin-top: 18px; font-size: 13px; opacity: .92; user-select: none; pointer-events: auto; }
     #boot-splash .perf-row label { cursor: pointer; }
     #boot-splash.error .perf-row { display: none; }
     #perf-badge {
@@ -514,7 +514,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v11";
+      var LOADER_VERSION = "v12";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
 
@@ -569,7 +569,7 @@
         PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
         try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
         ABS_PREFIX = PREFIX;
-        entryURL = PREFIX + "game-DskACDFO.js?v=2";
+        entryURL = PREFIX + "game-DskACDFO.js?v=3";
         cssURL = PREFIX + "game-C5MKlKFb.css";
         try {
           var cx = new XMLHttpRequest();
@@ -655,11 +655,14 @@
           } else {
             setBar(100, "click to play");
             if (splash) splash.classList.add("ready");
-            splash.addEventListener("mousedown", function go() {
+            splash.addEventListener("mousedown", function go(e) {
+              if (e && e.target && e.target.closest && e.target.closest(".perf-row")) return;
+              splash.removeEventListener("mousedown", go);
               splash.classList.remove("ready");
               startGame();
-            }, { once: true });
+            });
             window.addEventListener("keydown", function onKey(e) {
+              if (e.target && (e.target.id === "perf-toggle" || e.target.closest && e.target.closest(".perf-row"))) return;
               if (e.key === "Enter" || e.key === " ") {
                 window.removeEventListener("keydown", onKey);
                 startGame();
@@ -700,7 +703,7 @@
         PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
         try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
         ABS_PREFIX = PREFIX;
-        entryURL = PREFIX + "game-DskACDFO.js?v=2";
+        entryURL = PREFIX + "game-DskACDFO.js?v=3";
         cssURL = PREFIX + "game-C5MKlKFb.css";
         setBar(2, "mirror " + (tryIdx + 1) + "/" + CDNS.length + "...");
         downloadBundle();
