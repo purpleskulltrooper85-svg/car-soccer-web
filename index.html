@@ -37,6 +37,16 @@
     }
     @keyframes boot-bar-slide { to { background-position: -200% 0; } }
     #boot-splash .pct { font-variant-numeric: tabular-nums; font-size: 12px; opacity: .75; }
+    #boot-splash .perf-row { margin-top: 18px; font-size: 13px; opacity: .92; user-select: none; }
+    #boot-splash .perf-row label { cursor: pointer; }
+    #boot-splash.error .perf-row { display: none; }
+    #perf-badge {
+      position: fixed; right: 10px; bottom: 10px; z-index: 99990;
+      font: 11px/1 system-ui, sans-serif; color: #ffd27d; background: rgba(20,24,34,.72);
+      border: 1px solid rgba(255,210,125,.35); border-radius: 999px; padding: 6px 10px;
+      cursor: pointer; user-select: none; display: none;
+    }
+    #perf-badge.on { display: block; }
     @keyframes boot-spin { to { transform: rotate(360deg); } }
     #boot-splash.error { pointer-events: auto; }
     #boot-splash.error .spinner, #boot-splash.error .bar-wrap, #boot-splash.error .pct { display: none; }
@@ -60,9 +70,12 @@
    * CDN resolution order:
    *   - window.CAR_SOCCER_CDN  (edit the line below for a permanent setting)
    *   - "?cdn=..." query parameter  (also remembered in localStorage)
-   *   - localStorage "car-soccer:cdn"
-   *   - empty string: assets served from the folder next to this index.html
-   *     (works for local static servers and GitHub Pages)
+   *   - localStorage "car-soccer:cdn" (remembered value tried first, then
+   *     the default mirrors)
+   *   - default: try each mirror in order (GitHub Pages, jsDelivr, Statically)
+   *     - first one serving the game CSS is picked; if the bundle download
+   *       fails, the next mirror is tried automatically
+   *   - empty list: assets served from the folder next to this index.html
    *
    * Example CDN value once this repo is on GitHub (repo must be public):
    *   https://cdn.jsdelivr.net/gh/<user>/car-soccer-web@main
@@ -83,31 +96,41 @@
     } catch (e) {}
 
     // ----- configuration -----------------------------------------------------
-    // Default asset source: GitHub Pages (always fresh, CORS-enabled).
-    // Backup CDN: https://cdn.jsdelivr.net/gh/purpleskulltrooper85-svg/car-soccer-assets@main
-    var CDN = "https://purpleskulltrooper85-svg.github.io/car-soccer-assets";
+    // Asset sources, tried in order (first one that responds wins; if the
+    // bundle download fails, the loader automatically moves to the next):
+    //   1. GitHub Pages (always fresh, CORS-enabled)
+    //   2. jsDelivr GitHub mirror
+    //   3. Statically GitHub mirror
+    // "?cdn=<url>" overrides the list entirely (no fallback).
+    var DEFAULT_CDNS = [
+      "https://purpleskulltrooper85-svg.github.io/car-soccer-assets",
+      "https://cdn.jsdelivr.net/gh/purpleskulltrooper85-svg/car-soccer-assets@main",
+      "https://cdn.statically.io/gh/purpleskulltrooper85-svg/car-soccer-assets/main"
+    ];
+    var CDNS = [];
     try {
-      if (window.CAR_SOCCER_CDN) CDN = String(window.CAR_SOCCER_CDN).trim();
-      var qs = new URLSearchParams(location.search);
-      var p = qs.get("cdn");
-      if (p) {
-        CDN = p.trim();
-        try { localStorage.setItem("car-soccer:cdn", CDN); } catch (e) {}
-      } else if (CDN.indexOf("YOUR-USERNAME") >= 0) {
-        // Placeholder not replaced yet - use a saved value or local files instead.
-        var saved0 = null;
-        try { saved0 = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
-        CDN = saved0 ? saved0.trim() : "";
-      } else if (!CDN) {
-        var ls = null;
-        try { ls = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
-        if (ls) CDN = ls.trim();
+      if (window.CAR_SOCCER_CDN) {
+        CDNS = [String(window.CAR_SOCCER_CDN).trim()];
+      } else {
+        var qs = new URLSearchParams(location.search);
+        var p = qs.get("cdn");
+        if (p) {
+          CDNS = [p.trim()];
+          try { localStorage.setItem("car-soccer:cdn", CDNS[0]); } catch (e) {}
+        } else {
+          var ls = null;
+          try { ls = localStorage.getItem("car-soccer:cdn"); } catch (e) {}
+          if (ls) CDNS = [ls.trim()].concat(DEFAULT_CDNS);
+        }
       }
     } catch (e) {}
-    if (CDN) CDN = CDN.replace(/\/+$/, "");
+    if (!CDNS.length) CDNS = DEFAULT_CDNS.slice();
+    CDNS = CDNS.map(function (s) { return String(s).replace(/\/+$/, ""); })
+              .filter(function (s, i, a) { return s && a.indexOf(s) === i; });
 
     var locationDir = location.pathname.replace(/[^\/]*$/, "");
     // CDN mode: files sit at the repo root. Local mode: ./assets/ next to index.html.
+    var CDN = CDNS[0] || "";
     var PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
     // Normalize once to a fully absolute URL: on file:// the pathname is
     // "/C:/..." and path-relative strings are unusable for fetch/XHR.
@@ -430,14 +453,93 @@
       }
     }
 
+    // ----- performance mode ------------------------------------------------
+    // Caps the WebGL canvas backing-store resolution (CSS upscales it) so
+    // weak GPUs render fewer pixels. Toggle: splash checkbox, the PERF badge
+    // (bottom-right), or F8. Persisted in localStorage.
+    var PERF_KEY = "car-soccer:perf";
+    var PERF_SCALE = 0.6;
+    var perfOn = false;
+    try { perfOn = localStorage.getItem(PERF_KEY) === "1"; } catch (e) {}
+
+    var _cw = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "width");
+    var _ch = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "height");
+
+    function patchCanvas(cv) {
+      if (cv.__perfPatched) return;
+      cv.__perfPatched = true;
+      var self = cv;
+      Object.defineProperty(cv, "width", {
+        get: function () { return _cw.get.call(self); },
+        set: function (v) { _cw.set.call(self, perfOn ? Math.max(2, Math.round(v * PERF_SCALE)) : v); },
+        configurable: true
+      });
+      Object.defineProperty(cv, "height", {
+        get: function () { return _ch.get.call(self); },
+        set: function (v) { _ch.set.call(self, perfOn ? Math.max(2, Math.round(v * PERF_SCALE)) : v); },
+        configurable: true
+      });
+    }
+
+    function applyPerfToCanvas(cv) {
+      patchCanvas(cv);
+      var w = cv.width | 0, h = cv.height | 0;
+      if (!w || !h) return;
+      if (perfOn) {
+        _cw.set.call(cv, Math.max(2, Math.round(w * PERF_SCALE)));
+        _ch.set.call(cv, Math.max(2, Math.round(h * PERF_SCALE)));
+      } else {
+        _cw.set.call(cv, Math.min(8192, Math.round(w / PERF_SCALE)));
+        _ch.set.call(cv, Math.min(8192, Math.round(h / PERF_SCALE)));
+      }
+    }
+
+    function setPerf(on) {
+      perfOn = !!on;
+      try { localStorage.setItem(PERF_KEY, perfOn ? "1" : "0"); } catch (e) {}
+      var cs = document.getElementsByTagName("canvas");
+      for (var i = 0; i < cs.length; i++) applyPerfToCanvas(cs[i]);
+      var badge = document.getElementById("perf-badge");
+      if (badge) badge.classList.toggle("on", perfOn);
+      var cb = document.getElementById("perf-toggle");
+      if (cb) cb.checked = perfOn;
+    }
+
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "F8") { e.preventDefault(); setPerf(!perfOn); }
+    });
+
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v8";
+      var LOADER_VERSION = "v9";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
 
       var bootBar = document.getElementById("boot-bar");
+
+      // Wire the performance-mode toggle + initialize badge/checkbox state.
+      var perfCb = document.getElementById("perf-toggle");
+      if (perfCb) {
+        perfCb.checked = perfOn;
+        perfCb.addEventListener("change", function () { setPerf(perfCb.checked); });
+      }
+      var perfBadge = document.getElementById("perf-badge");
+      if (perfBadge) {
+        perfBadge.classList.toggle("on", perfOn);
+        perfBadge.addEventListener("mousedown", function (e) { e.preventDefault(); setPerf(!perfOn); });
+      }
+      // Scan for the game canvas (created later by the bundle) so perf mode
+      // catches it as soon as it appears.
+      setInterval(function () {
+        var cs = document.getElementsByTagName("canvas");
+        for (var i = 0; i < cs.length; i++) {
+          if (!cs[i].__perfPatched) {
+            patchCanvas(cs[i]);
+            if (perfOn) applyPerfToCanvas(cs[i]);
+          }
+        }
+      }, 800);
       var bootPct = document.getElementById("boot-pct");
       function setBar(p, label) {
         if (bootBar) bootBar.style.width = Math.max(0, Math.min(100, p)) + "%";
@@ -452,22 +554,42 @@
         if (splash) { splash.classList.add("hide"); setTimeout(function () { splash.remove(); }, 500); }
       }
 
-      var entryURL = PREFIX + "game-DskACDFO.js";
-      var cssURL = PREFIX + "game-C5MKlKFb.css";
+      var entryURL = "";
+      var cssURL = "";
 
-      // Probe so a missing local asset folder produces a clear message.
-      if (location.protocol === "http:" || location.protocol === "https:") {
+      // Pick the first CDN that actually serves the small CSS file. If the
+      // big bundle download fails later, the loader moves on to the next
+      // mirror (see tryNext below). Also produces a clear message when the
+      // assets folder is missing in local mode.
+      var cdnOK = false;
+      for (var ci = 0; ci < CDNS.length; ci++) {
+        CDN = CDNS[ci] || "";
+        PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
+        try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
+        ABS_PREFIX = PREFIX;
+        entryURL = PREFIX + "game-DskACDFO.js";
+        cssURL = PREFIX + "game-C5MKlKFb.css";
         try {
-          var probe = new XMLHttpRequest();
-          probe.open("HEAD", entryURL, false);
-          probe.send(null);
-          if (!(probe.status >= 200 && probe.status < 300) && !CDN) {
-            fail("Game assets were not found next to index.html (" + entryURL + ").\n\n" +
-                 "Serve this whole folder with any static server (e.g. \"npx serve\"),\n" +
-                 "or add ?cdn=<asset-base-url> to the page URL.");
-            return;
+          var cx = new XMLHttpRequest();
+          cx.open("GET", cssURL, false);
+          cx.send(null);
+          if ((cx.status >= 200 && cx.status < 300 || cx.status === 0) && (cx.responseText || "").length > 0) {
+            // Inline the CSS with rewritten url() paths (a <link> would leave
+            // root-relative url(/assets/...) unpatched, breaking on file://
+            // and subpaths).
+            var style = document.createElement("style");
+            style.textContent = cx.responseText.split("/assets/").join(ABS_PREFIX);
+            document.head.appendChild(style);
+            cdnOK = true;
+            break;
           }
         } catch (e) {}
+      }
+      if (!cdnOK) {
+        fail("Could not reach any asset source:\n" + CDNS.join("\n") +
+             "\n\nThe network you are on may block them - try another connection (e.g. a phone hotspot),\n" +
+             "or pass ?cdn=<asset-base-url> to the page URL.");
+        return;
       }
 
       // Web manifest: on file:// Chrome blocks it entirely (CORS on unique
@@ -488,75 +610,81 @@
         }
       } catch (e) {}
 
-      // Inline the CSS with rewritten url() paths (a <link> would leave
-      // root-relative url(/assets/...) unpatched, breaking on file:// and subpaths).
-      try {
-        var cx = new XMLHttpRequest();
-        cx.open("GET", cssURL, false);
-        cx.send(null);
-        if (cx.status >= 200 && cx.status < 300 || cx.status === 0) {
-          var cssText = cx.responseText.split("/assets/").join(ABS_PREFIX);
-          var style = document.createElement("style");
-          style.textContent = cssText;
-          document.head.appendChild(style);
-        } else {
-          throw new Error("CSS " + cx.status);
-        }
-      } catch (e) {
-        var link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.crossOrigin = "anonymous";
-        link.href = cssURL;
-        document.head.appendChild(link);
-      }
+      // (CSS was already inlined above while picking the working CDN.)
 
       // Pre-download the bundle with a real progress bar; the XHR fills the
       // HTTP cache so the follow-up <script src> load is instant. When the
       // total size is unknown (file://, missing content-length), fall back to
       // a smooth asymptotic animation.
       setBar(2, "starting...");
-      var xhr = new XMLHttpRequest();
-      xhr.open("GET", entryURL, true);
-      xhr.responseType = "arraybuffer";
-      var lastLoaded = 0;
-      var fakeTimer = setInterval(function () {
-        var cur = parseFloat(bootBar.style.width) || 2;
-        if (cur < 92) setBar(cur + (92 - cur) * 0.035);
-      }, 200);
-      xhr.onprogress = function (e) {
+      var tryIdx = CDNS.indexOf(CDN);
+      if (tryIdx < 0) tryIdx = 0;
+      var fakeTimer = 0;
+      function startFake(rate) {
         clearInterval(fakeTimer);
-        if (e.lengthComputable && e.total > 0) {
-          setBar(2 + (e.loaded / e.total) * 96);
-        } else {
+        fakeTimer = setInterval(function () {
           var cur = parseFloat(bootBar.style.width) || 2;
-          if (cur < 92) setBar(cur + (92 - cur) * 0.15);
-        }
-        lastLoaded = e.loaded;
-      };
-      xhr.onload = function () {
-        clearInterval(fakeTimer);
-        if (!(xhr.status >= 200 && xhr.status < 300) && xhr.status !== 0) {
-          fail("Failed to download the game bundle (" + xhr.status + ") from:\n" + entryURL);
+          if (cur < 92) setBar(cur + (92 - cur) * rate);
+        }, 200);
+      }
+      function downloadBundle() {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", entryURL, true);
+        xhr.responseType = "arraybuffer";
+        xhr.onprogress = function (e) {
+          if (e.lengthComputable && e.total > 0) {
+            clearInterval(fakeTimer);
+            setBar(2 + (e.loaded / e.total) * 96);
+          } else {
+            startFake(0.15);
+            var cur = parseFloat(bootBar.style.width) || 2;
+            if (cur < 92) setBar(cur + (92 - cur) * 0.15);
+          }
+        };
+        xhr.onload = function () {
+          clearInterval(fakeTimer);
+          if (!(xhr.status >= 200 && xhr.status < 300) && xhr.status !== 0) {
+            tryNext("HTTP " + xhr.status);
+            return;
+          }
+          setBar(100, "starting game...");
+          var script = document.createElement("script");
+          script.type = "module";
+          script.crossOrigin = "anonymous";
+          script.src = entryURL;
+          script.onerror = function () {
+            fail("Failed to load the game bundle from:\n" + entryURL +
+                 "\n\nIf using the default CDN: check the URL is correct and the repo is public.");
+          };
+          script.addEventListener("load", hideSplash);
+          document.body.appendChild(script);
+        };
+        xhr.onerror = function () {
+          clearInterval(fakeTimer);
+          tryNext("network error");
+        };
+        startFake(0.035);
+        xhr.send(null);
+      }
+      function tryNext(why) {
+        tryIdx++;
+        if (tryIdx >= CDNS.length) {
+          fail("Could not download the game bundle (" + why + "). Tried every asset source:\n" +
+               CDNS.join("\n") +
+               "\n\nThe network you are on probably blocks them - try another connection (e.g. a phone hotspot),\n" +
+               "or pass ?cdn=<asset-base-url> to the page URL.");
           return;
         }
-        setBar(100, "starting game...");
-        var script = document.createElement("script");
-        script.type = "module";
-        script.crossOrigin = "anonymous";
-        script.src = entryURL;
-        script.onerror = function () {
-          fail("Failed to load the game bundle from:\n" + entryURL +
-               "\n\nIf using the default CDN: check the URL is correct and the repo is public.");
-        };
-        script.addEventListener("load", hideSplash);
-        document.body.appendChild(script);
-      };
-      xhr.onerror = function () {
-        clearInterval(fakeTimer);
-        fail("Could not download the game bundle from:\n" + entryURL +
-             "\n\nCheck your connection, or pass ?cdn=<asset-base-url> to the URL.");
-      };
-      xhr.send(null);
+        CDN = CDNS[tryIdx];
+        PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
+        try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
+        ABS_PREFIX = PREFIX;
+        entryURL = PREFIX + "game-DskACDFO.js";
+        cssURL = PREFIX + "game-C5MKlKFb.css";
+        setBar(2, "mirror " + (tryIdx + 1) + "/" + CDNS.length + "...");
+        downloadBundle();
+      }
+      downloadBundle();
     }
 
     if (document.readyState === "loading") {
@@ -573,6 +701,8 @@
     <div class="msg" id="boot-msg">Loading Car Soccer...</div>
     <div class="bar-wrap"><div class="bar" id="boot-bar"></div></div>
     <div class="pct" id="boot-pct">0%</div>
+    <div class="perf-row"><label><input type="checkbox" id="perf-toggle"> Performance mode (smoother on slower devices)</label></div>
   </div>
+  <div id="perf-badge" title="Performance mode is ON - click or press F8 to toggle">PERF</div>
 </body>
 </html>
