@@ -514,7 +514,7 @@
     function boot() {
       var splash = document.getElementById("boot-splash");
       var splashMsg = document.getElementById("boot-msg");
-      var LOADER_VERSION = "v13";
+      var LOADER_VERSION = "v14";
       try { window.LOADER_VERSION = LOADER_VERSION; } catch (e) {}
       if (splashMsg) splashMsg.textContent = "Loading Car Soccer... (loader " + LOADER_VERSION + ")";
 
@@ -569,7 +569,7 @@
         PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
         try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
         ABS_PREFIX = PREFIX;
-        entryURL = PREFIX + "game-DskACDFO.js?v=4";
+        entryURL = PREFIX + "game-DskACDFO.js?v=5";
         cssURL = PREFIX + "game-C5MKlKFb.css";
         try {
           var cx = new XMLHttpRequest();
@@ -703,7 +703,7 @@
         PREFIX = CDN ? CDN + "/" : locationDir + "assets/";
         try { PREFIX = new URL(PREFIX, location.href).href; } catch (e) {}
         ABS_PREFIX = PREFIX;
-        entryURL = PREFIX + "game-DskACDFO.js?v=4";
+        entryURL = PREFIX + "game-DskACDFO.js?v=5";
         cssURL = PREFIX + "game-C5MKlKFb.css";
         setBar(2, "mirror " + (tryIdx + 1) + "/" + CDNS.length + "...");
         downloadBundle();
